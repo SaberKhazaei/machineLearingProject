@@ -1,0 +1,21 @@
+name: myenv
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.10
+  - pandas
+  - numpy
+  - scikit-learn
+  - rdkit
+  - networkx
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pip
+  - pip:
+    - fastapi
+    - uvicorn
+    - elasticsearch>=8.0.0
+    - torch-geometric 

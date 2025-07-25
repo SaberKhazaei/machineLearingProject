@@ -1,0 +1,9 @@
+#fastapi
+#uvicorn
+#pandas
+torch
+#torch-geometric
+#rdkit-py
+#elasticsearch
+#scikit-learn
+#networkx

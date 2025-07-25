@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class ElasticsearchClient:
     """Elasticsearch client for molecular search operations"""
     
-    def __init__(self, host: str = 'localhost', port: int = 9200):
+    def __init__(self, host: str = '127.0.0.1', port: int = 9201):
         """Initialize Elasticsearch client"""
         self.host = host
         self.port = port

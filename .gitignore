@@ -1,0 +1,85 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+miniconda3/
+.conda/
+conda-env/
+Miniconda3-latest-Linux-x86_64.sh
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Elastic Search
+elasticsearch-*/
+esdata/
+elasticsearch_data/
+
+# Model files and data
+*.pth
+*.pt
+*.model
+*.pkl
+*.h5
+
+# Logs
+logs/
+*.log
+
+# Local configuration
+local_settings.py
+instance/
+.webassets-cache
+
+# Database
+*.sqlite3
+*.db 

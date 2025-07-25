@@ -2,6 +2,7 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors
 from torch_geometric.data import Data
 import torch
+from typing import Optional
 
 class SMILESToGraph:
     """Convert SMILES strings to PyTorch Geometric graph data"""
