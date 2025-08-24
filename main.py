@@ -1,7 +1,7 @@
 import os
 from utils.interactive_search import InteractiveSearch
 from utils.dataset_handler import DatasetHandler
-from search.search_engine import MolecularSearchEngine
+from search.search_engine import MoleculeSearchEngine
 
 """
 USAGE:
@@ -16,7 +16,7 @@ For API usage, use api_server.py instead.
 def update_dataset_from_csv(csv_file: str = "dataset.csv"):
     """Update the molecular database with new molecules from your CSV file"""
     print(f"Updating dataset from {csv_file}...")
-    search_engine = MolecularSearchEngine(use_elasticsearch=True)
+    search_engine = MoleculeSearchEngine(use_elasticsearch=True)
     try:
         search_engine.load_model('molecular_gnn_model.pth')
         print("Loaded existing model")
@@ -37,7 +37,7 @@ def update_dataset_from_csv(csv_file: str = "dataset.csv"):
 def load_and_store_dataset_to_elastic(csv_file: str = "dataset/test_dataset.csv"):
     """Load dataset from CSV and store in Elasticsearch"""
     print(f"Loading and storing dataset from {csv_file} to Elasticsearch...")
-    search_engine = MolecularSearchEngine(use_elasticsearch=True)
+    search_engine = MoleculeSearchEngine(use_elasticsearch=True)
     dataset_handler = DatasetHandler(search_engine)
     try:
         dataset_handler.load_and_store_dataset(csv_file)
@@ -49,7 +49,7 @@ def load_and_store_dataset_to_elastic(csv_file: str = "dataset/test_dataset.csv"
 def test_with_your_dataset():
     """Test the system with molecules from your specific dataset"""
     print("Testing with your dataset molecules...")
-    search_engine = MolecularSearchEngine(use_elasticsearch=True)
+    search_engine = MoleculeSearchEngine(use_elasticsearch=True)
     try:
         search_engine.load_model('molecular_gnn_model.pth')
         print("Loaded existing model")

@@ -1,12 +1,12 @@
 import pandas as pd
 from typing import List, Dict
-from search.search_engine import MolecularSearchEngine
+from search.search_engine import MoleculeSearchEngine
 import ast
 
 class DatasetHandler:
     """Class for handling molecular dataset operations"""
     
-    def __init__(self, search_engine: MolecularSearchEngine):
+    def __init__(self, search_engine: MoleculeSearchEngine):
         """Initialize dataset handler"""
         self.search_engine = search_engine
     

@@ -4,13 +4,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import pandas as pd
 from utils.dataset_handler import DatasetHandler
-from search.search_engine import MolecularSearchEngine
+from search.search_engine import MoleculeSearchEngine
 import uvicorn
 
 app = FastAPI(title="Molecular Similarity API")
 
 # Initialize search engine and dataset handler (singleton for the app)
-search_engine = MolecularSearchEngine(use_elasticsearch=True)
+search_engine = MoleculeSearchEngine(use_elasticsearch=True)
 dataset_handler = DatasetHandler(search_engine)
 
 MODEL_PATH = 'molecular_gnn_model.pth'

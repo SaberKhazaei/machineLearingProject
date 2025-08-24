@@ -1,104 +1,124 @@
+# file: data/graph_converter.py
+
+import torch
+import networkx as nx
+from torch_geometric.data import Data
 from rdkit import Chem
 from rdkit.Chem import Descriptors
-from torch_geometric.data import Data
-import torch
-from typing import Optional
+from rdkit.Chem.rdchem import BondType
 
-class SMILESToGraph:
-    """Convert SMILES strings to PyTorch Geometric graph data"""
+
+class GraphConverter:
+
+    def __init__(self, feature_dim: int = 38):
+        # ابعاد ثابت برای ویژگی‌های نودها (اتم‌ها)
+        self.feature_dim = feature_dim
+
+    def atom_features(self, atom: Chem.Atom) -> torch.Tensor:
+        
+        atomic_num = atom.GetAtomicNum()
+        degree = atom.GetTotalDegree()
+        formal_charge = atom.GetFormalCharge()
+        aromatic = 1 if atom.GetIsAromatic() else 0
+
+        feats = [
+            atomic_num,
+            degree,
+            formal_charge,
+            aromatic,
+        ]
+
+        tensor = torch.tensor(feats, dtype=torch.float)
+
     
-    @staticmethod
-    def get_atom_features(atom):
-        """Extract atom features for GNN"""
-        features = []
-        
-        # Atomic number (one-hot encoded for common elements)
-        atomic_nums = [6, 7, 8, 9, 15, 16, 17, 35, 53]  # C, N, O, F, P, S, Cl, Br, I
-        for num in atomic_nums:
-            features.append(1 if atom.GetAtomicNum() == num else 0)
-        
-        # Degree
-        degree_options = [0, 1, 2, 3, 4, 5]
-        degree = atom.GetDegree()
-        for d in degree_options:
-            features.append(1 if degree == d else 0)
-        
-        # Formal charge
-        charge_options = [-2, -1, 0, 1, 2]
-        charge = atom.GetFormalCharge()
-        for c in charge_options:
-            features.append(1 if charge == c else 0)
-        
-        # Hybridization
-        hybrid_options = [Chem.rdchem.HybridizationType.SP,
-                         Chem.rdchem.HybridizationType.SP2,
-                         Chem.rdchem.HybridizationType.SP3,
-                         Chem.rdchem.HybridizationType.SP3D,
-                         Chem.rdchem.HybridizationType.SP3D2]
-        hybrid = atom.GetHybridization()
-        for h in hybrid_options:
-            features.append(1 if hybrid == h else 0)
-        
-        # Aromaticity
-        features.append(1 if atom.GetIsAromatic() else 0)
-        
-        # Number of hydrogens
-        h_options = [0, 1, 2, 3, 4]
-        total_h = atom.GetTotalNumHs()
-        for h in h_options:
-            features.append(1 if total_h == h else 0)
-        
-        # In ring
-        features.append(1 if atom.IsInRing() else 0)
-        
-        # Ring size (if in ring)
-        ring_sizes = [3, 4, 5, 6, 7, 8]
-        atom_ring_info = atom.GetOwningMol().GetRingInfo()
-        atom_rings = atom_ring_info.AtomRings()
-        in_ring_size = set()
-        for ring in atom_rings:
-            if atom.GetIdx() in ring:
-                in_ring_size.add(len(ring))
-        
-        for size in ring_sizes:
-            features.append(1 if size in in_ring_size else 0)
-        
-        return features
+        if tensor.shape[0] < self.feature_dim:
+            pad_len = self.feature_dim - tensor.shape[0]
+            tensor = torch.cat([tensor, torch.zeros(pad_len)])
+        elif tensor.shape[0] > self.feature_dim:
+            tensor = tensor[: self.feature_dim]
+
+        return tensor
+
+    def mol_to_graph(self, smiles: str) -> Data:
     
-    @staticmethod
-    def smiles_to_graph(smiles: str) -> Optional[Data]:
-        """Convert SMILES string to PyTorch Geometric Data object"""
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            if mol is None:
-                return None
-            
-            # Add hydrogens
-            mol = Chem.AddHs(mol)
-            
-            # Get atom features
-            atom_features = []
-            for atom in mol.GetAtoms():
-                atom_features.append(SMILESToGraph.get_atom_features(atom))
-            
-            # Convert to tensor
-            x = torch.tensor(atom_features, dtype=torch.float)
-            
-            # Get edge indices
-            edge_indices = []
-            for bond in mol.GetBonds():
-                i = bond.GetBeginAtomIdx()
-                j = bond.GetEndAtomIdx()
-                edge_indices.extend([(i, j), (j, i)])  # Undirected graph
-            
-            if len(edge_indices) == 0:
-                # Single atom molecule
-                edge_index = torch.empty((2, 0), dtype=torch.long)
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES string: {smiles}")
+
+        # نودها
+        x = torch.stack([self.atom_features(atom) for atom in mol.GetAtoms()])
+
+        # یال‌ها
+        edges = []
+        edge_attrs = []
+        for bond in mol.GetBonds():
+            start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+            bond_type = bond.GetBondType()
+
+            # encode bond type
+            if bond_type == BondType.SINGLE:
+                b = [1, 0, 0, 0]
+            elif bond_type == BondType.DOUBLE:
+                b = [0, 1, 0, 0]
+            elif bond_type == BondType.TRIPLE:
+                b = [0, 0, 1, 0]
+            elif bond_type == BondType.AROMATIC:
+                b = [0, 0, 0, 1]
             else:
-                edge_index = torch.tensor(edge_indices, dtype=torch.long).t().contiguous()
-            
-            return Data(x=x, edge_index=edge_index)
-            
-        except Exception as e:
-            print(f"Error processing SMILES {smiles}: {e}")
-            return None
+                b = [0, 0, 0, 0]
+
+            edges.append([start, end])
+            edges.append([end, start])
+            edge_attrs.append(b)
+            edge_attrs.append(b)
+
+        if not edges:
+            # self-loop در صورت نبود پیوند
+            edges = [[i, i] for i in range(len(x))]
+            edge_attrs = [[1, 0, 0, 0]] * len(x)
+
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_attrs, dtype=torch.float)
+
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+    def compute_descriptors(self, smiles: str) -> dict:
+        """
+        محاسبه توصیف‌گرهای استاندارد مولکولی با RDKit
+        """
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES string: {smiles}")
+
+        desc = {
+            "MolWt": Descriptors.MolWt(mol),
+            "ExactMolWt": Descriptors.ExactMolWt(mol),
+            "MolLogP": Descriptors.MolLogP(mol),
+            "TPSA": Descriptors.TPSA(mol),
+            "NumHDonors": Descriptors.NumHDonors(mol),
+            "NumHAcceptors": Descriptors.NumHAcceptors(mol),
+            "NumRotatableBonds": Descriptors.NumRotatableBonds(mol),
+            "NumAromaticRings": Descriptors.NumAromaticRings(mol),
+        }
+        return desc
+
+    def smiles_to_graph_nx(self, smiles: str) -> nx.Graph:
+        """
+        تبدیل SMILES به NetworkX Graph (برای visualization یا پردازش اضافه).
+        """
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError(f"Invalid SMILES string: {smiles}")
+
+        g = nx.Graph()
+        for atom in mol.GetAtoms():
+            g.add_node(atom.GetIdx(), symbol=atom.GetSymbol())
+
+        for bond in mol.GetBonds():
+            g.add_edge(
+                bond.GetBeginAtomIdx(),
+                bond.GetEndAtomIdx(),
+                type=str(bond.GetBondType()),
+            )
+
+        return g

@@ -1,12 +1,12 @@
 from typing import Optional
-from search.search_engine import MolecularSearchEngine
+from search.search_engine import MoleculeSearchEngine
 
 class InteractiveSearch:
     """Class for handling interactive molecular search"""
     
     def __init__(self):
         """Initialize the interactive search system"""
-        self.search_engine = MolecularSearchEngine()
+        self.search_engine = MoleculeSearchEngine()
         self._load_model()
         
     def _load_model(self) -> None:

@@ -1,135 +1,143 @@
-from typing import List, Tuple, Dict, Optional
-from search.elasticsearch.client import ElasticsearchClient
-import torch
-import os
-from models.gnn_model import MolecularGNN
-from data.graph_converter import SMILESToGraph
+# file: engine/search_engine.py
 
-class MolecularSearchEngine:
-    """Main class for molecular similarity search using GNN embeddings"""
+import os
+import pandas as pd
+from elasticsearch import Elasticsearch, helpers
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+from data.graph_converter import GraphConverter
+
+
+class MoleculeSearchEngine:
     
-    def __init__(self, model_path: str = None, use_elasticsearch: bool = True):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = MolecularGNN().to(self.device)
-        self.molecules_db = {}  # Store molecule data
-        self.embeddings = {}   # Store precomputed embeddings
-        self.use_elasticsearch = use_elasticsearch
-        
+
+    def __init__(self, index_name: str = "molecules", es_host: str = "http://localhost:9200" , use_elasticsearch: bool = True):
+        self.index_name = index_name
+        self.es = Elasticsearch(es_host)
+        self.converter = GraphConverter()
+
         if use_elasticsearch:
-            try:
-                self.es_client = ElasticsearchClient()
-                self.index_name = 'molecular_embeddings'
-                self._create_elasticsearch_index()
-            except Exception as e:
-                print(f"Elasticsearch connection failed: {e}")
-                print("Falling back to in-memory search")
-                self.use_elasticsearch = False
+            self.es = Elasticsearch(es_host)
+        else:
+            self.es = None
         
-        if model_path and os.path.exists(model_path):
-            self.load_model(model_path)
-    
-    def _create_elasticsearch_index(self):
-        """Create Elasticsearch index for molecular embeddings"""
-        mapping = {
-            "properties": {
-                "name": {"type": "keyword"},
-                "smiles": {"type": "keyword"},
-                "embedding": {
-                    "type": "dense_vector",
-                    "dims": 64  # Should match embedding_dim in model
-                },
-                "molecular_weight": {"type": "float"},
-                "logp": {"type": "float"}
-            }
-        }
-        self.es_client.create_index(self.index_name, mapping)
-    
-    def load_model(self, model_path: str):
-        """Load pre-trained model weights"""
-        try:
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-            self.model.eval()
-        except Exception as e:
-            print(f"Error loading model: {e}")
-    
-    def add_molecule(self, name: str, smiles: str):
-        """Add a molecule to the database"""
-        try:
-            graph = SMILESToGraph.smiles_to_graph(smiles)
-            if graph is None:
-                print(f"Invalid SMILES string: {smiles}")
-                return False
             
-            # Generate embedding
-            graph = graph.to(self.device)
-            embedding = self.model(graph.x, graph.edge_index, torch.zeros(graph.num_nodes, dtype=torch.long).to(self.device))
-            
-            # Store molecule data
-            self.molecules_db[name] = {
-                'smiles': smiles,
-                'molecular_weight': Descriptors.MolWt(Chem.MolFromSmiles(smiles)),
-                'logp': Descriptors.MolLogP(Chem.MolFromSmiles(smiles))
-            }
-            
-            # Store embedding
-            self.embeddings[name] = embedding.cpu().detach().numpy()
-            
-            # Store in Elasticsearch if enabled
-            if self.use_elasticsearch:
-                doc = {
-                    'name': name,
-                    'smiles': smiles,
-                    'embedding': embedding.cpu().detach().numpy().tolist(),
-                    'molecular_weight': self.molecules_db[name]['molecular_weight'],
-                    'logp': self.molecules_db[name]['logp']
-                }
-                self.es_client.index_document(self.index_name, doc, name)
-            
-            return True
-        except Exception as e:
-            print(f"Error adding molecule {name}: {e}")
-            return False
-    
-    def search_similar_molecules(self, query_smiles: str, top_k: int = 5) -> List[Tuple[str, float]]:
-        """Find similar molecules based on GNN embeddings"""
-        try:
-            query_graph = SMILESToGraph.smiles_to_graph(query_smiles)
-            if query_graph is None:
-                return []
-            
-            query_graph = query_graph.to(self.device)
-            query_embedding = self.model(query_graph.x, query_graph.edge_index, 
-                                      torch.zeros(query_graph.num_nodes, dtype=torch.long).to(self.device))
-            
-            if self.use_elasticsearch:
-                # Use Elasticsearch for similarity search
-                query = {
-                    "size": top_k,
-                    "query": {
-                        "script_score": {
-                            "query": {"match_all": {}},
-                            "script": {
-                                "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
-                                "params": {"query_vector": query_embedding.cpu().detach().numpy().tolist()}
-                            }
-                        }
+    def create_index(self):
+        
+        if not self.es.indices.exists(index=self.index_name):
+            mapping = {
+                "mappings": {
+                    "properties": {
+                        "name": {"type": "text"},
+                        "smiles": {"type": "keyword"},
+                        "descriptors": {"type": "object", "enabled": True},
                     }
                 }
-                
-                results = self.es_client.search(self.index_name, query, top_k)
-                return [(hit['_id'], hit['_score']) for hit in results]
-            
-            # In-memory search using cosine similarity
-            similarities = []
-            for name, embedding in self.embeddings.items():
-                similarity = torch.nn.functional.cosine_similarity(
-                    torch.tensor(query_embedding.cpu().detach().numpy()),
-                    torch.tensor(embedding)
-                ).item()
-                similarities.append((name, similarity))
-            
-            return sorted(similarities, key=lambda x: x[1], reverse=True)[:top_k]
-            
+            }
+            self.es.indices.create(index=self.index_name, body=mapping)
+            print(f"Created index '{self.index_name}'.")
+        else:
+            print(f"Index '{self.index_name}' already exists.")
+
+    def add_molecule(self, name: str, smiles: str):
+     
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                raise ValueError("Invalid SMILES")
+
+            descriptors = self.converter.compute_descriptors(smiles)
+
+            doc = {
+                "name": name,
+                "smiles": smiles,
+                "descriptors": descriptors,
+            }
+            self.es.index(index=self.index_name, body=doc)
         except Exception as e:
-            print(f"Error in search: {e}")
-            return []
+            print(f"Error adding molecule {name}: {e}")
+
+    def load_dataset(self, dataset_path: str):
+        """
+        بارگذاری دیتاست CSV و اضافه کردن همه مولکول‌ها
+        """
+        if not os.path.exists(dataset_path):
+            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+
+        df = pd.read_csv(dataset_path)
+
+        required_cols = {"name", "smiles"}
+        if not required_cols.issubset(df.columns):
+            raise ValueError(f"Dataset must contain columns: {required_cols}")
+
+        actions = []
+        for _, row in df.iterrows():
+            try:
+                mol = Chem.MolFromSmiles(row["smiles"])
+                if mol is None:
+                    continue
+
+                descriptors = self.converter.compute_descriptors(row["smiles"])
+
+                doc = {
+                    "_index": self.index_name,
+                    "_source": {
+                        "name": row["name"],
+                        "smiles": row["smiles"],
+                        "descriptors": descriptors,
+                    },
+                }
+                actions.append(doc)
+            except Exception as e:
+                print(f"Error adding molecule {row['name']}: {e}")
+
+        if actions:
+            helpers.bulk(self.es, actions)
+            print(f"Loaded and stored {len(actions)} compounds from {dataset_path} into Elasticsearch.")
+        else:
+            print("No valid molecules found in dataset.")
+
+    def search_by_name(self, query: str, top_k: int = 5):
+        """
+        جستجو بر اساس نام مولکول
+        """
+        body = {
+            "query": {
+                "match": {"name": {"query": query, "fuzziness": "AUTO"}}
+            }
+        }
+        res = self.es.search(index=self.index_name, body=body, size=top_k)
+        return [hit["_source"] for hit in res["hits"]["hits"]]
+
+    def search_by_descriptor(self, descriptor: str, value: float, tolerance: float = 0.1, top_k: int = 5):
+        """
+        جستجو بر اساس یک توصیفگر (مثلا MolWt)
+        """
+        body = {
+            "query": {
+                "range": {
+                    f"descriptors.{descriptor}": {
+                        "gte": value * (1 - tolerance),
+                        "lte": value * (1 + tolerance),
+                    }
+                }
+            }
+        }
+        res = self.es.search(index=self.index_name, body=body, size=top_k)
+        return [hit["_source"] for hit in res["hits"]["hits"]]
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Molecule Search Engine")
+    parser.add_argument("--dataset", type=str, default="dataset/test_dataset.csv", help="Path to dataset CSV")
+    args = parser.parse_args()
+
+    engine = MoleculeSearchEngine()
+    engine.create_index()
+    engine.load_dataset(args.dataset)
+
+    print("Dataset successfully loaded and stored in Elasticsearch!")
+    print("This script provides utility functions for dataset update, testing, and interactive search.")
+    print("For API usage, run api_server.py.")
