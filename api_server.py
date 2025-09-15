@@ -21,9 +21,11 @@ try:
 except Exception:
     pass
 
+
 class SearchRequest(BaseModel):
     smiles: str
     top_k: int = 5
+
 
 @app.post("/upload-dataset")
 async def upload_dataset(file: UploadFile = File(...)):
@@ -44,6 +46,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process CSV: {e}")
 
+
 @app.post("/search-similar")
 def search_similar(request: SearchRequest):
     """
@@ -59,11 +62,32 @@ def search_similar(request: SearchRequest):
             output.append({
                 'name': name,
                 'smiles': smiles,
-                'similarity_score': score
+                'similarity_score': float(score)
             })
         return {"results": output}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
+
+@app.get("/search-by-name")
+def search_by_name(name: str, top_k: int = 5):
+    """
+    Search for molecules similar to the given molecule name.
+    """
+    try:
+        results = search_engine.search_similar_molecules(name, top_k=top_k)
+        output = []
+        for mol_name, score in results:
+            smiles = search_engine.molecules_db.get(mol_name, {}).get("smiles", None)
+            output.append({
+                "name": mol_name,
+                "smiles": smiles,
+                "similarity_score": float(score)
+            })
+        return {"query": name, "results": output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search by name failed: {e}")
+
+
 if __name__ == "__main__":
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)
